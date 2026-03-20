@@ -31,7 +31,14 @@ data class QWeatherHourly(
     @SerialName("fxTime") val fxTime: String,
     @SerialName("temp") val temp: String,
     @SerialName("icon") val icon: String,
-    @SerialName("pop") val pop: String
+    @SerialName("text") val text: String,
+    @SerialName("wind360") val wind360: String,
+    @SerialName("windDir") val windDir: String,
+    @SerialName("windScale") val windScale: String,
+    @SerialName("windSpeed") val windSpeed: String,
+    @SerialName("humidity") val humidity: String,
+    @SerialName("pop") val pop: String,
+    @SerialName("pressure") val pressure: String
 )
 
 @Serializable

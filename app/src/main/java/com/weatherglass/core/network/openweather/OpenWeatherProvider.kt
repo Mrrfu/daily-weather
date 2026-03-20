@@ -29,11 +29,16 @@ class OpenWeatherProvider @Inject constructor(
         val forecast = api.forecast(lat, lon, appId = key)
 
         val hourly = forecast.list.take(24).map {
+            val weatherItem = it.weather.firstOrNull()
             HourlyForecast(
                 timestampEpochSec = it.dt,
                 temperatureC = it.main.temp,
-                condition = mapOpenWeatherId(it.weather.firstOrNull()?.id ?: 0),
-                precipitationProbability = ((it.pop ?: 0.0) * 100).toInt()
+                condition = mapOpenWeatherId(weatherItem?.id ?: 0),
+                description = weatherItem?.description ?: "",
+                precipitationProbability = ((it.pop ?: 0.0) * 100).toInt(),
+                humidity = it.main.humidity,
+                windDirection = windDirectionFromDegrees(it.wind?.deg ?: 0),
+                windSpeedKph = (it.wind?.speed ?: 0.0) * 3.6
             )
         }
 

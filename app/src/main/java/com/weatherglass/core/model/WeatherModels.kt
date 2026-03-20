@@ -21,7 +21,11 @@ data class HourlyForecast(
     val timestampEpochSec: Long,
     val temperatureC: Double,
     val condition: WeatherCondition,
-    val precipitationProbability: Int
+    val description: String = "",
+    val precipitationProbability: Int,
+    val humidity: Int = 0,
+    val windDirection: String = "",
+    val windSpeedKph: Double = 0.0
 )
 
 @Serializable

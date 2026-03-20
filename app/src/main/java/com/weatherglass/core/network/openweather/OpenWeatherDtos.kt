@@ -21,6 +21,7 @@ data class OpenForecastItem(
     @SerialName("dt") val dt: Long,
     @SerialName("main") val main: OpenMain,
     @SerialName("weather") val weather: List<OpenWeatherItem>,
+    @SerialName("wind") val wind: OpenWind? = null,
     @SerialName("pop") val pop: Double? = null
 )
 

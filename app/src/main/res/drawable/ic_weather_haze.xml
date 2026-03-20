@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- 模糊的太阳 -->
+    <path
+        android:fillColor="#CFD8DC"
+        android:pathData="M12,7c-2.76,0 -5,2.24 -5,5s2.24,5 5,5 5,-2.24 5,-5 -2.24,-5 -5,-5z" />
+    <!-- 霾线 -->
+    <path
+        android:fillColor="#90A4AE"
+        android:strokeWidth="1.5"
+        android:strokeColor="#78909C"
+        android:pathData="M3,18h18" />
+    <path
+        android:fillColor="#90A4AE"
+        android:strokeWidth="1.5"
+        android:strokeColor="#78909C"
+        android:pathData="M5,21h14" />
+</vector>

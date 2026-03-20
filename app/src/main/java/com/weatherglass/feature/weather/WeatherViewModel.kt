@@ -23,7 +23,8 @@ data class WeatherScreenState(
     val selectedCityId: String? = null,
     val weatherByCityId: Map<String, WeatherBundle> = emptyMap(),
     val hasLocationPermission: Boolean = false,
-    val networkWarning: String? = null
+    val networkWarning: String? = null,
+    val isRefreshing: Boolean = false
 )
 
 @HiltViewModel
@@ -93,7 +94,14 @@ class WeatherViewModel @Inject constructor(
 
     fun refreshCurrent() {
         val cityId = _state.value.selectedCityId ?: return
-        refreshForCity(cityId)
+        _state.update { it.copy(isRefreshing = true) }
+        viewModelScope.launch {
+            try {
+                refreshForCity(cityId)
+            } finally {
+                _state.update { it.copy(isRefreshing = false) }
+            }
+        }
     }
 
     fun selectCity(cityId: String) {

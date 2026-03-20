@@ -2,6 +2,7 @@ package com.weatherglass.core.data
 
 import com.weatherglass.core.common.AppResult
 import com.weatherglass.core.database.CityDao
+import com.weatherglass.core.database.WeatherCacheEntity
 import com.weatherglass.core.database.WeatherDao
 import com.weatherglass.core.database.toDomain
 import com.weatherglass.core.database.toEntity
@@ -34,7 +35,7 @@ class WeatherRepositoryImpl @Inject constructor(
             .ifEmpty { configuredProviders }
 
         if (ordered.isEmpty()) {
-            return AppResult.Error(IllegalStateException("未检测到可用天气服务，请在应用内“输入设置”配置 API Key"))
+            return AppResult.Error(IllegalStateException("未检测到可用天气服务，请在应用内输入设置配置 API Key"))
         }
 
         var lastError: Throwable? = null
@@ -45,7 +46,7 @@ class WeatherRepositoryImpl @Inject constructor(
             if (result.isSuccess) {
                 val weather = result.getOrThrow()
                 weatherDao.upsert(
-                    com.weatherglass.core.database.WeatherCacheEntity(
+                    WeatherCacheEntity(
                         cityId = city.id,
                         providerId = weather.providerId,
                         updatedAtEpochSec = weather.updatedAtEpochSec,
@@ -57,13 +58,26 @@ class WeatherRepositoryImpl @Inject constructor(
             lastError = result.exceptionOrNull()
         }
 
+        // 尝试加载缓存（5分钟内的缓存有效）
         val cache = weatherDao.getByCityId(city.id)
+        if (cache != null && isCacheValid(cache)) {
+            val cached = json.decodeFromString(WeatherBundle.serializer(), cache.payloadJson)
+            return AppResult.Success(cached, fromCache = true)
+        }
+
+        // 即使缓存过期，在网络失败时也返回缓存数据
         if (cache != null) {
             val cached = json.decodeFromString(WeatherBundle.serializer(), cache.payloadJson)
             return AppResult.Success(cached, fromCache = true)
         }
 
         return AppResult.Error(lastError ?: IllegalStateException("No provider available"))
+    }
+
+    private fun isCacheValid(cache: WeatherCacheEntity): Boolean {
+        val currentTime = System.currentTimeMillis() / 1000
+        val cacheAge = currentTime - cache.updatedAtEpochSec
+        return cacheAge < CACHE_MAX_AGE_SECONDS
     }
 
     override suspend fun searchCity(query: String): AppResult<List<City>> {
@@ -129,5 +143,9 @@ class WeatherRepositoryImpl @Inject constructor(
 
     override fun observeSavedCities(): Flow<List<City>> {
         return cityDao.observeAll().map { list -> list.map { it.toDomain() } }
+    }
+
+    companion object {
+        private const val CACHE_MAX_AGE_SECONDS = 300L // 5分钟
     }
 }

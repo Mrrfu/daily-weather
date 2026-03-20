@@ -54,8 +54,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.res.painterResource
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -79,9 +81,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
+import com.weatherglass.R
 import com.weatherglass.core.common.UiState
 import com.weatherglass.core.model.DailyForecast
 import com.weatherglass.core.model.CurrentWeather
+import com.weatherglass.core.model.HourlyForecast
 import com.weatherglass.core.model.LifestyleAdvice
 import com.weatherglass.core.model.WeatherCondition
 import com.weatherglass.core.model.WeatherBundle
@@ -93,6 +97,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import java.time.Instant
@@ -144,13 +150,23 @@ private fun WeatherScreen(
     }
     val effectiveBundle = bundle ?: lastStableBundle
     val weatherCondition = effectiveBundle?.current?.condition ?: lastStableCondition
-    val visual = weatherVisualStyle(weatherCondition)
+    val visual = remember(weatherCondition) { weatherVisualStyle(weatherCondition) }
     val animatedTop by animateColorAsState(targetValue = visual.top, animationSpec = tween(450), label = "top")
     val animatedMid by animateColorAsState(targetValue = visual.mid, animationSpec = tween(450), label = "mid")
     val animatedBottom by animateColorAsState(targetValue = visual.bottom, animationSpec = tween(450), label = "bottom")
-    val cityName = state.cities.firstOrNull { it.id == state.selectedCityId }?.name ?: "请选择城市"
-    val selectedBundle = state.selectedCityId?.let { state.weatherByCityId[it] } ?: effectiveBundle
-    val selectedIndex = state.cities.indexOfFirst { it.id == state.selectedCityId }.coerceAtLeast(0)
+    val cityName by remember(state.cities, state.selectedCityId) {
+        derivedStateOf {
+            state.cities.firstOrNull { it.id == state.selectedCityId }?.name ?: "请选择城市"
+        }
+    }
+    val selectedBundle = remember(state.selectedCityId, state.weatherByCityId, effectiveBundle) {
+        state.selectedCityId?.let { state.weatherByCityId[it] } ?: effectiveBundle
+    }
+    val selectedIndex by remember(state.cities, state.selectedCityId) {
+        derivedStateOf {
+            state.cities.indexOfFirst { it.id == state.selectedCityId }.coerceAtLeast(0)
+        }
+    }
     var showMenu by remember { mutableStateOf(false) }
     var show7DaysPage by remember { mutableStateOf(false) }
     var dragOffsetPx by remember { mutableFloatStateOf(0f) }
@@ -168,6 +184,7 @@ private fun WeatherScreen(
         animationSpec = infiniteRepeatable(animation = tween(4200), repeatMode = RepeatMode.Reverse),
         label = "tint"
     )
+    val hapticFeedback = LocalHapticFeedback.current
     fun moveCityPage(next: Boolean) {
         if (state.cities.isEmpty()) return
         val newIndex = if (next) {
@@ -176,6 +193,7 @@ private fun WeatherScreen(
             (selectedIndex - 1).coerceAtLeast(0)
         }
         if (newIndex != selectedIndex) {
+            hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
             onSelectCity(state.cities[newIndex].id)
         }
     }
@@ -249,7 +267,7 @@ private fun WeatherScreen(
                             }
                             DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                                 DropdownMenuItem(
-                                    text = { Text("输入设置") },
+                                    text = { Text("设置") },
                                     onClick = {
                                         showMenu = false
                                         onOpenApiSettings()
@@ -334,6 +352,14 @@ private fun WeatherScreen(
 
                 item {
                     Spacer(Modifier.height(220.dp))
+                }
+
+                item {
+                    Box(modifier = Modifier.offset { IntOffset(followOffsetX.roundToInt(), 0) }) {
+                        selectedBundle?.let {
+                            HourlyForecastPanel(hourly = it.hourly)
+                        }
+                    }
                 }
 
                 item {
@@ -434,6 +460,62 @@ private fun HeroTemperature(bundle: WeatherBundle) {
                 color = Color.White,
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
             )
+        }
+    }
+}
+
+@Composable
+private fun HourlyForecastPanel(hourly: List<HourlyForecast>) {
+    if (hourly.isEmpty()) return
+
+    GlassCard {
+        Text("逐时预报", color = Color.White, style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(12.dp))
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            hourly.forEach { hour ->
+                val time = remember(hour.timestampEpochSec) {
+                    val instant = java.time.Instant.ofEpochSecond(hour.timestampEpochSec)
+                    val zdt = instant.atZone(java.time.ZoneId.systemDefault())
+                    "${zdt.hour}:00"
+                }
+
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = time,
+                        color = Color.White.copy(alpha = 0.8f),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+
+                    WeatherIcon(
+                        condition = hour.condition,
+                        size = 24.sp
+                    )
+
+                    Text(
+                        text = "${hour.temperatureC.toInt()}°",
+                        color = Color.White,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Medium
+                    )
+
+                    if (hour.precipitationProbability > 0) {
+                        Text(
+                            text = "${hour.precipitationProbability}%",
+                            color = Color(0xFF64B5F6),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -599,9 +681,12 @@ private fun SevenDayTrendBoard(
         }
     }
 
-    val maxTemp = days.maxOf { it.maxTempC }
-    val minTemp = days.minOf { it.minTempC }
-    val span = (maxTemp - minTemp).takeIf { it > 0 } ?: 1.0
+    val (maxTemp, minTemp, span) = remember(days) {
+        val max = days.maxOf { it.maxTempC }
+        val min = days.minOf { it.minTempC }
+        val s = (max - min).takeIf { it > 0 } ?: 1.0
+        Triple(max, min, s)
+    }
     val itemWidth = 72.dp
     val boardWidth = itemWidth * days.size
     val boardHeight = 340.dp
@@ -642,7 +727,7 @@ private fun SevenDayTrendBoard(
                                 Text(dateLabel(index, day.dateEpochSec), color = primaryText, style = MaterialTheme.typography.bodyMedium)
                                 Text(epochToMd(day.dateEpochSec), color = secondaryText, style = MaterialTheme.typography.bodySmall)
                                 Spacer(Modifier.height(6.dp))
-                                Text(conditionIcon(day.condition), fontSize = 14.sp)
+                                WeatherIcon(condition = day.condition, size = 16.sp)
                                 Text(day.condition.toChinese(), color = secondaryText, style = MaterialTheme.typography.bodySmall)
                             }
 
@@ -653,7 +738,7 @@ private fun SevenDayTrendBoard(
                                 verticalArrangement = Arrangement.spacedBy(2.dp)
                             ) {
                                 Text(day.condition.toChinese(), color = secondaryText, style = MaterialTheme.typography.bodySmall)
-                                Text(conditionIcon(day.condition), fontSize = 12.sp)
+                                WeatherIcon(condition = day.condition, size = 14.sp)
                                 Text(
                                     text = dayWindText(day),
                                     color = if (isActive) Color(0xFFFFB14A) else secondaryText,
@@ -1020,6 +1105,32 @@ private fun SevenDayChart(days: List<DailyForecast>) {
 private fun epochToMd(epochSec: Long): String {
     val zdt = Instant.ofEpochSecond(epochSec).atZone(ZoneId.systemDefault())
     return "${zdt.monthValue}-${zdt.dayOfMonth}"
+}
+
+@Composable
+private fun WeatherIcon(
+    condition: WeatherCondition,
+    modifier: Modifier = Modifier,
+    size: androidx.compose.ui.unit.TextUnit = 24.sp
+) {
+    val iconRes = when (condition) {
+        WeatherCondition.Clear -> R.drawable.ic_weather_clear
+        WeatherCondition.Cloudy -> R.drawable.ic_weather_cloudy
+        WeatherCondition.Rain -> R.drawable.ic_weather_rain
+        WeatherCondition.Snow -> R.drawable.ic_weather_snow
+        WeatherCondition.Thunder -> R.drawable.ic_weather_thunder
+        WeatherCondition.Fog -> R.drawable.ic_weather_fog
+        WeatherCondition.Wind -> R.drawable.ic_weather_wind
+        WeatherCondition.Haze -> R.drawable.ic_weather_haze
+        WeatherCondition.Unknown -> R.drawable.ic_weather_cloudy
+    }
+
+    Icon(
+        painter = painterResource(id = iconRes),
+        contentDescription = condition.toChinese(),
+        modifier = modifier.size(size.value.dp),
+        tint = Color.Unspecified
+    )
 }
 
 private fun conditionIcon(condition: WeatherCondition): String {
