@@ -9,6 +9,7 @@ import com.weatherglass.core.model.WeatherBundle
 import com.weatherglass.core.model.WeatherCondition
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlin.math.abs
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -46,10 +47,29 @@ class CityManageViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             repository.observeSavedCities().collect { list ->
-                _state.update { it.copy(saved = list) }
-                refreshCityWeatherSummaries(list)
+                val deduped = deduplicateCities(list)
+                _state.update { it.copy(saved = deduped) }
+                refreshCityWeatherSummaries(deduped)
             }
         }
+    }
+
+    private fun deduplicateCities(input: List<City>): List<City> {
+        val result = mutableListOf<City>()
+        input.forEach { city ->
+            val hitIndex = result.indexOfFirst { existing ->
+                existing.name.equals(city.name, ignoreCase = true) &&
+                    abs(existing.latitude - city.latitude) <= 0.12 &&
+                    abs(existing.longitude - city.longitude) <= 0.12
+            }
+            if (hitIndex == -1) {
+                result += city
+            } else {
+                val keep = if (city.isCurrentLocation) city else result[hitIndex]
+                result[hitIndex] = keep
+            }
+        }
+        return result.sortedBy { it.sortOrder }
     }
 
     private fun refreshCityWeatherSummaries(cities: List<City>) {

@@ -10,6 +10,7 @@ import com.weatherglass.core.model.City
 import com.weatherglass.core.model.WeatherBundle
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlin.math.abs
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -20,6 +21,7 @@ data class WeatherScreenState(
     val weatherState: UiState<WeatherBundle> = UiState.Loading,
     val cities: List<City> = emptyList(),
     val selectedCityId: String? = null,
+    val weatherByCityId: Map<String, WeatherBundle> = emptyMap(),
     val hasLocationPermission: Boolean = false,
     val networkWarning: String? = null
 )
@@ -40,17 +42,37 @@ class WeatherViewModel @Inject constructor(
     private fun observeCities() {
         viewModelScope.launch {
             repository.observeSavedCities().collect { list ->
+                val deduped = deduplicateCities(list)
                 _state.update {
                     it.copy(
-                        cities = list,
-                        selectedCityId = it.selectedCityId ?: list.firstOrNull()?.id
+                        cities = deduped,
+                        selectedCityId = it.selectedCityId?.takeIf { id -> deduped.any { c -> c.id == id } }
+                            ?: deduped.firstOrNull()?.id
                     )
                 }
-                if (list.isNotEmpty()) {
-                    refreshForCity(_state.value.selectedCityId ?: list.first().id)
+                if (deduped.isNotEmpty()) {
+                    refreshForCity(_state.value.selectedCityId ?: deduped.first().id)
                 }
             }
         }
+    }
+
+    private fun deduplicateCities(input: List<City>): List<City> {
+        val result = mutableListOf<City>()
+        input.forEach { city ->
+            val hitIndex = result.indexOfFirst { existing ->
+                existing.name.equals(city.name, ignoreCase = true) &&
+                    abs(existing.latitude - city.latitude) <= 0.12 &&
+                    abs(existing.longitude - city.longitude) <= 0.12
+            }
+            if (hitIndex == -1) {
+                result += city
+            } else {
+                val keep = if (city.isCurrentLocation) city else result[hitIndex]
+                result[hitIndex] = keep
+            }
+        }
+        return result.sortedBy { it.sortOrder }
     }
 
     fun onLocationPermissionChanged(granted: Boolean) {
@@ -63,9 +85,9 @@ class WeatherViewModel @Inject constructor(
     fun loadCurrentLocationCity() {
         viewModelScope.launch {
             val city = locationRepository.currentLocationCity() ?: return@launch
-            repository.cacheCity(city)
-            _state.update { it.copy(selectedCityId = city.id) }
-            refreshForCity(city.id)
+            val merged = repository.cacheCity(city)
+            _state.update { it.copy(selectedCityId = merged.id) }
+            refreshForCity(merged.id)
         }
     }
 
@@ -88,9 +110,11 @@ class WeatherViewModel @Inject constructor(
                     _state.update {
                         it.copy(
                             weatherState = UiState.Success(result.data, fromCache = result.fromCache),
+                            weatherByCityId = it.weatherByCityId + (city.id to result.data),
                             networkWarning = if (result.fromCache) "网络异常，当前展示缓存数据" else null
                         )
                     }
+                    prefetchAdjacent(cityId)
                 }
 
                 is AppResult.Error -> {
@@ -99,6 +123,27 @@ class WeatherViewModel @Inject constructor(
                             weatherState = UiState.Error(result.throwable.message ?: "天气获取失败")
                         )
                     }
+                }
+            }
+        }
+    }
+
+    private fun prefetchAdjacent(cityId: String) {
+        val cities = _state.value.cities
+        val index = cities.indexOfFirst { it.id == cityId }
+        if (index == -1) return
+        val neighbors = listOfNotNull(cities.getOrNull(index - 1), cities.getOrNull(index + 1))
+
+        neighbors.forEach { neighbor ->
+            viewModelScope.launch {
+                when (val result = repository.fetchWeather(neighbor)) {
+                    is AppResult.Success -> {
+                        _state.update {
+                            it.copy(weatherByCityId = it.weatherByCityId + (neighbor.id to result.data))
+                        }
+                    }
+
+                    is AppResult.Error -> Unit
                 }
             }
         }

@@ -2,14 +2,12 @@ package com.weatherglass.feature.weather
 
 import android.Manifest
 import android.graphics.Paint
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -66,6 +64,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onSizeChanged
@@ -149,7 +149,7 @@ private fun WeatherScreen(
     val animatedMid by animateColorAsState(targetValue = visual.mid, animationSpec = tween(450), label = "mid")
     val animatedBottom by animateColorAsState(targetValue = visual.bottom, animationSpec = tween(450), label = "bottom")
     val cityName = state.cities.firstOrNull { it.id == state.selectedCityId }?.name ?: "请选择城市"
-    val cityIndexMap = remember(state.cities) { state.cities.mapIndexed { index, city -> city.id to index }.toMap() }
+    val selectedBundle = state.selectedCityId?.let { state.weatherByCityId[it] } ?: effectiveBundle
     val selectedIndex = state.cities.indexOfFirst { it.id == state.selectedCityId }.coerceAtLeast(0)
     var showMenu by remember { mutableStateOf(false) }
     var show7DaysPage by remember { mutableStateOf(false) }
@@ -178,6 +178,10 @@ private fun WeatherScreen(
         if (newIndex != selectedIndex) {
             onSelectCity(state.cities[newIndex].id)
         }
+    }
+
+    BackHandler(enabled = show7DaysPage) {
+        show7DaysPage = false
     }
 
     Surface(modifier = Modifier.fillMaxSize()) {
@@ -278,7 +282,7 @@ private fun WeatherScreen(
                 item {
                     when (val weather = state.weatherState) {
                         UiState.Loading -> {
-                            effectiveBundle?.let { HeroTemperature(it) }
+                            selectedBundle?.let { HeroTemperature(it) }
                         }
 
                         is UiState.Error -> {
@@ -290,7 +294,38 @@ private fun WeatherScreen(
                         }
 
                         is UiState.Success -> {
-                            HeroTemperature(weather.value)
+                            val currentIndex = state.cities.indexOfFirst { it.id == state.selectedCityId }.coerceAtLeast(0)
+                            val leftCity = state.cities.getOrNull(currentIndex - 1)
+                            val rightCity = state.cities.getOrNull(currentIndex + 1)
+                            val drag = followOffsetX
+
+                            Box(modifier = Modifier.fillMaxWidth()) {
+                                val width = dragContainerWidth.toFloat().coerceAtLeast(1f)
+                                val ratio = (kotlin.math.abs(drag) / width).coerceIn(0f, 1f)
+
+                                selectedBundle?.let { current ->
+                                    Box(modifier = Modifier.offset { IntOffset(drag.roundToInt(), 0) }) {
+                                        HeroTemperature(current)
+                                    }
+                                }
+
+                                val targetBundle = if (drag < 0) {
+                                    rightCity?.let { state.weatherByCityId[it.id] }
+                                } else {
+                                    leftCity?.let { state.weatherByCityId[it.id] }
+                                }
+
+                                if (targetBundle != null && ratio > 0.02f) {
+                                    val incomingX = if (drag < 0) drag + width else drag - width
+                                    Box(
+                                        modifier = Modifier
+                                            .offset { IntOffset(incomingX.roundToInt(), 0) }
+                                            .alpha((ratio * 1.15f).coerceIn(0f, 1f))
+                                    ) {
+                                        HeroTemperature(targetBundle)
+                                    }
+                                }
+                            }
                         }
 
                         UiState.Empty -> Unit
@@ -302,20 +337,8 @@ private fun WeatherScreen(
                 }
 
                 item {
-                    AnimatedContent(
-                        modifier = Modifier.offset { IntOffset(followOffsetX.roundToInt(), 0) },
-                        targetState = effectiveBundle,
-                        transitionSpec = {
-                            val from = cityIndexMap[initialState?.cityId] ?: 0
-                            val to = cityIndexMap[targetState?.cityId] ?: 0
-                            val slideLeft = to > from
-                            (slideInHorizontally(animationSpec = tween(280)) { full -> if (slideLeft) full / 2 else -full / 2 } + fadeIn(animationSpec = tween(220))).togetherWith(
-                                slideOutHorizontally(animationSpec = tween(260)) { full -> if (slideLeft) -full / 2 else full / 2 } + fadeOut(animationSpec = tween(220))
-                            )
-                        },
-                        label = "forecast-slide"
-                    ) { animatedBundle ->
-                        animatedBundle?.let {
+                    Box(modifier = Modifier.offset { IntOffset(followOffsetX.roundToInt(), 0) }) {
+                        selectedBundle?.let {
                             ForecastPanel(
                                 daily = it.daily,
                                 onOpen7Days = { show7DaysPage = true }
@@ -325,40 +348,16 @@ private fun WeatherScreen(
                 }
 
                 item {
-                    AnimatedContent(
-                        modifier = Modifier.offset { IntOffset(followOffsetX.roundToInt(), 0) },
-                        targetState = effectiveBundle,
-                        transitionSpec = {
-                            val from = cityIndexMap[initialState?.cityId] ?: 0
-                            val to = cityIndexMap[targetState?.cityId] ?: 0
-                            val slideLeft = to > from
-                            (slideInHorizontally(animationSpec = tween(300)) { full -> if (slideLeft) full / 2 else -full / 2 } + fadeIn(animationSpec = tween(220))).togetherWith(
-                                slideOutHorizontally(animationSpec = tween(280)) { full -> if (slideLeft) -full / 2 else full / 2 } + fadeOut(animationSpec = tween(220))
-                            )
-                        },
-                        label = "detail-slide"
-                    ) { animatedBundle ->
-                        animatedBundle?.let {
+                    Box(modifier = Modifier.offset { IntOffset(followOffsetX.roundToInt(), 0) }) {
+                        selectedBundle?.let {
                             WeatherDetailPanel(current = it.current)
                         }
                     }
                 }
 
                 item {
-                    AnimatedContent(
-                        modifier = Modifier.offset { IntOffset(followOffsetX.roundToInt(), 0) },
-                        targetState = effectiveBundle,
-                        transitionSpec = {
-                            val from = cityIndexMap[initialState?.cityId] ?: 0
-                            val to = cityIndexMap[targetState?.cityId] ?: 0
-                            val slideLeft = to > from
-                            (slideInHorizontally(animationSpec = tween(320)) { full -> if (slideLeft) full / 2 else -full / 2 } + fadeIn(animationSpec = tween(220))).togetherWith(
-                                slideOutHorizontally(animationSpec = tween(300)) { full -> if (slideLeft) -full / 2 else full / 2 } + fadeOut(animationSpec = tween(220))
-                            )
-                        },
-                        label = "advice-slide"
-                    ) { animatedBundle ->
-                        animatedBundle?.let {
+                    Box(modifier = Modifier.offset { IntOffset(followOffsetX.roundToInt(), 0) }) {
+                        selectedBundle?.let {
                             LifestyleAdvicePanel(
                                 current = it.current,
                                 apiLifestyle = it.lifestyle
@@ -378,11 +377,17 @@ private fun WeatherScreen(
                 }
             }
 
-            if (show7DaysPage && effectiveBundle != null) {
-                SevenDayForecastPage(
-                    daily = effectiveBundle.daily,
-                    onBack = { show7DaysPage = false }
-                )
+            AnimatedVisibility(
+                visible = show7DaysPage && effectiveBundle != null,
+                enter = fadeIn(animationSpec = tween(220)),
+                exit = fadeOut(animationSpec = tween(220))
+            ) {
+                effectiveBundle?.let {
+                    SevenDayForecastPage(
+                        daily = it.daily,
+                        onBack = { show7DaysPage = false }
+                    )
+                }
             }
         }
     }
@@ -485,18 +490,18 @@ private fun SevenDayForecastPage(
     daily: List<DailyForecast>,
     onBack: () -> Unit
 ) {
-    val days = daily.take(7)
+    val days = normalizedSevenDays(daily)
     val night = isNightNow()
     val pageBrush = if (night) {
         Brush.verticalGradient(listOf(Color(0xFF0B101C), Color(0xFF000000)))
     } else {
-        Brush.verticalGradient(listOf(SunnyStart, SunnyEnd, Color(0xFFF2AA7D)))
+        Brush.verticalGradient(listOf(Color.White, Color.White))
     }
-    val panelColor = if (night) Color(0xCC111A2E) else Color(0xFFF4F4F6)
-    val itemColor = if (night) Color(0xFF1A2740) else Color(0xFFF0F0F2)
-    val activeItemColor = if (night) Color(0xFF223558) else Color.White
-    val primaryText = if (night) Color.White else Color(0xFF262626)
-    val secondaryText = if (night) Color.White.copy(alpha = 0.78f) else Color(0xFF808080)
+    val panelColor = if (night) Color(0xCC111A2E) else Color.White
+    val itemColor = if (night) Color(0xFF1A2740) else Color(0xFFF0F2F5)
+    val activeItemColor = if (night) Color(0xFF223558) else Color(0xFFE8ECF2)
+    val primaryText = if (night) Color.White else Color.Black
+    val secondaryText = if (night) Color.White.copy(alpha = 0.78f) else Color.Black
 
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -514,14 +519,23 @@ private fun SevenDayForecastPage(
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 12.dp, vertical = 8.dp)
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Start,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "back", tint = primaryText)
                     }
-                    Text("7日天气预报", style = MaterialTheme.typography.headlineMedium, color = primaryText)
                 }
 
-                Spacer(Modifier.height(20.dp))
+                Spacer(Modifier.height(34.dp))
+                Text(
+                    text = "7日天气预报",
+                    color = primaryText,
+                    style = MaterialTheme.typography.headlineMedium,
+                    modifier = Modifier.padding(start = 4.dp, bottom = 10.dp)
+                )
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -561,20 +575,27 @@ private fun SevenDayTrendBoard(
 ) {
     if (days.isEmpty()) return
 
-    val highTextPaint = remember {
+    val highLineColor = if (night) Color(0xFFC59A4D) else Color(0xFFFFC107)
+    val lowLineColor = if (night) Color(0xFF9FB48F) else Color(0xFFFFC107)
+    val dayLabelColor = if (night) android.graphics.Color.parseColor("#E8C26E") else android.graphics.Color.BLACK
+    val nightLabelColor = if (night) android.graphics.Color.parseColor("#AFC3A0") else android.graphics.Color.BLACK
+
+    val highTextPaint = remember(dayLabelColor) {
         Paint().apply {
-            color = android.graphics.Color.parseColor("#E8C26E")
-            textSize = 24f
+            color = dayLabelColor
+            textSize = 32f
             isAntiAlias = true
             textAlign = Paint.Align.CENTER
+            isFakeBoldText = true
         }
     }
-    val lowTextPaint = remember {
+    val lowTextPaint = remember(nightLabelColor) {
         Paint().apply {
-            color = android.graphics.Color.parseColor("#AFC3A0")
-            textSize = 24f
+            color = nightLabelColor
+            textSize = 32f
             isAntiAlias = true
             textAlign = Paint.Align.CENTER
+            isFakeBoldText = true
         }
     }
 
@@ -596,60 +617,6 @@ private fun SevenDayTrendBoard(
                 .width(boardWidth)
                 .height(boardHeight)
         ) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val width = size.width
-                val height = size.height
-                val itemWidthPx = width / days.size
-
-                val highBandTop = height * 0.47f
-                val highBandBottom = height * 0.52f
-                val lowBandTop = height * 0.56f
-                val lowBandBottom = height * 0.61f
-
-                fun yForHigh(temp: Double): Float {
-                    val p = ((maxTemp - temp) / span).toFloat()
-                    return highBandTop + p * (highBandBottom - highBandTop)
-                }
-
-                fun yForLow(temp: Double): Float {
-                    val p = ((maxTemp - temp) / span).toFloat()
-                    return lowBandTop + p * (lowBandBottom - lowBandTop)
-                }
-
-                val highPoints = days.mapIndexed { index, d ->
-                    Offset(itemWidthPx * index + itemWidthPx / 2f, yForHigh(d.maxTempC))
-                }
-                val lowPoints = days.mapIndexed { index, d ->
-                    Offset(itemWidthPx * index + itemWidthPx / 2f, yForLow(d.minTempC))
-                }
-
-                highPoints.zipWithNext().forEach { (a, b) ->
-                    drawLine(color = Color(0xFFC59A4D), start = a, end = b, strokeWidth = 2.6f)
-                }
-                lowPoints.zipWithNext().forEach { (a, b) ->
-                    drawLine(color = Color(0xFF9FB48F), start = a, end = b, strokeWidth = 2.6f)
-                }
-
-                highPoints.forEachIndexed { index, p ->
-                    drawCircle(color = Color(0xFFE5B85A), radius = 3.4f, center = p)
-                    drawContext.canvas.nativeCanvas.drawText("${days[index].maxTempC.toInt()}°", p.x, p.y - 10f, highTextPaint)
-                }
-                lowPoints.forEachIndexed { index, p ->
-                    drawCircle(color = Color(0xFF9FB48F), radius = 3.4f, center = p)
-                    drawContext.canvas.nativeCanvas.drawText("${days[index].minTempC.toInt()}°", p.x, p.y + 24f, lowTextPaint)
-                }
-
-                repeat(days.size + 1) { i ->
-                    val x = itemWidthPx * i
-                    drawLine(
-                        color = if (night) Color.White.copy(alpha = 0.06f) else Color(0x22000000),
-                        start = Offset(x, 0f),
-                        end = Offset(x, height),
-                        strokeWidth = 1f
-                    )
-                }
-            }
-
             Row(modifier = Modifier.fillMaxSize()) {
                 days.forEachIndexed { index, day ->
                     val isActive = index == 0
@@ -657,6 +624,8 @@ private fun SevenDayTrendBoard(
                         modifier = Modifier
                             .width(itemWidth)
                             .fillMaxHeight()
+                            .padding(horizontal = 2.dp, vertical = 2.dp)
+                            .clip(RoundedCornerShape(10.dp))
                             .background(if (isActive) activeItemColor.copy(alpha = if (night) 0.45f else 1f) else itemColor.copy(alpha = if (night) 0.22f else 0.85f))
                     ) {
                         Column(
@@ -695,8 +664,61 @@ private fun SevenDayTrendBoard(
                     }
                 }
             }
+
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val width = size.width
+                val height = size.height
+                val itemWidthPx = width / days.size
+
+                val highBandTop = height * 0.47f
+                val highBandBottom = height * 0.52f
+                val lowBandTop = height * 0.56f
+                val lowBandBottom = height * 0.61f
+
+                fun yForHigh(temp: Double): Float {
+                    val p = ((maxTemp - temp) / span).toFloat()
+                    return highBandTop + p * (highBandBottom - highBandTop)
+                }
+
+                fun yForLow(temp: Double): Float {
+                    val p = ((maxTemp - temp) / span).toFloat()
+                    return lowBandTop + p * (lowBandBottom - lowBandTop)
+                }
+
+                val highPoints = days.mapIndexed { index, d ->
+                    Offset(itemWidthPx * index + itemWidthPx / 2f, yForHigh(d.maxTempC))
+                }
+                val lowPoints = days.mapIndexed { index, d ->
+                    Offset(itemWidthPx * index + itemWidthPx / 2f, yForLow(d.minTempC))
+                }
+
+                highPoints.zipWithNext().forEach { (a, b) ->
+                    drawLine(color = highLineColor, start = a, end = b, strokeWidth = 4.4f)
+                }
+                lowPoints.zipWithNext().forEach { (a, b) ->
+                    drawLine(color = lowLineColor, start = a, end = b, strokeWidth = 4.4f)
+                }
+
+                highPoints.forEachIndexed { index, p ->
+                    drawCircle(color = highLineColor, radius = 5.2f, center = p)
+                    drawContext.canvas.nativeCanvas.drawText("${days[index].maxTempC.toInt()}°", p.x, p.y - 14f, highTextPaint)
+                }
+                lowPoints.forEachIndexed { index, p ->
+                    drawCircle(color = lowLineColor, radius = 5.2f, center = p)
+                    drawContext.canvas.nativeCanvas.drawText("${days[index].minTempC.toInt()}°", p.x, p.y + 30f, lowTextPaint)
+                }
+            }
         }
     }
+}
+
+private fun normalizedSevenDays(source: List<DailyForecast>): List<DailyForecast> {
+    if (source.isEmpty()) return emptyList()
+    val sorted = source.sortedBy { it.dateEpochSec }
+    val todayStart = java.time.LocalDate.now().atStartOfDay(java.time.ZoneId.systemDefault()).toEpochSecond()
+    val fromToday = sorted.dropWhile { it.dateEpochSec < todayStart }
+    val base = if (fromToday.isNotEmpty()) fromToday else sorted
+    return base.take(7)
 }
 
 private fun dayWindText(day: DailyForecast): String {

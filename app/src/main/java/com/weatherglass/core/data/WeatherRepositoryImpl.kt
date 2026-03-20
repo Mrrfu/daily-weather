@@ -7,11 +7,13 @@ import com.weatherglass.core.database.toDomain
 import com.weatherglass.core.database.toEntity
 import com.weatherglass.core.model.City
 import com.weatherglass.core.model.WeatherBundle
+import kotlin.math.abs
 import com.weatherglass.core.network.ProviderSelector
 import com.weatherglass.core.network.WeatherProvider
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.json.Json
 
@@ -32,7 +34,7 @@ class WeatherRepositoryImpl @Inject constructor(
             .ifEmpty { configuredProviders }
 
         if (ordered.isEmpty()) {
-            return AppResult.Error(IllegalStateException("未检测到可用天气服务，请在 gradle.properties 或 local.properties 配置 API Key"))
+            return AppResult.Error(IllegalStateException("未检测到可用天气服务，请在应用内“输入设置”配置 API Key"))
         }
 
         var lastError: Throwable? = null
@@ -95,8 +97,26 @@ class WeatherRepositoryImpl @Inject constructor(
         return AppResult.Error(normalized)
     }
 
-    override suspend fun cacheCity(city: City) {
-        cityDao.upsert(city.toEntity())
+    override suspend fun cacheCity(city: City): City {
+        val existing = cityDao.observeAll().firstOrNull().orEmpty()
+        val duplicate = existing.firstOrNull { entity ->
+            val sameName = entity.name.equals(city.name, ignoreCase = true)
+            val closeEnough = abs(entity.latitude - city.latitude) <= 0.12 && abs(entity.longitude - city.longitude) <= 0.12
+            sameName && closeEnough
+        }
+
+        val finalCity = if (duplicate != null) {
+            city.copy(
+                id = duplicate.id,
+                sortOrder = duplicate.sortOrder,
+                isCurrentLocation = city.isCurrentLocation || duplicate.isCurrentLocation
+            )
+        } else {
+            city
+        }
+
+        cityDao.upsert(finalCity.toEntity())
+        return finalCity
     }
 
     override suspend fun deleteCity(city: City) {

@@ -10,7 +10,7 @@ interface WeatherRepository {
 
     suspend fun searchCity(query: String): AppResult<List<City>>
 
-    suspend fun cacheCity(city: City)
+    suspend fun cacheCity(city: City): City
 
     suspend fun deleteCity(city: City)
 
